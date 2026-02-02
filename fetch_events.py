@@ -6,7 +6,7 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 FEED_URL = os.environ["FEED_URL"]
 
-HOURS_AHEAD = 1  # 👈 change to 6, 24, etc.
+HOURS_AHEAD = 72  # 👈 change to 6, 24, etc.
 
 def send(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
