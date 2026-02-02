@@ -6,7 +6,7 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 FEED_URL = os.environ["FEED_URL"]
 
-HOURS_AHEAD = 2  # look ahead window
+HOURS_AHEAD = 24  # look ahead window
 
 # IST timezone
 IST = timezone(timedelta(hours=5, minutes=30))
