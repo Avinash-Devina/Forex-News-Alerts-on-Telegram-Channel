@@ -1,30 +1,40 @@
 import os
 import requests
-import hashlib
+from datetime import datetime, timezone
 
-BOT_TOKEN = os.environ["8211906927:AAEuqveIbJyinxuWQ_FqLb_KwLqaRXKgyO0"]
-CHAT_ID = os.environ["7920132476"]
-FEED_URL = os.environ["https://nfs.faireconomy.media/ff_calendar_thisweek.json"]
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+CHAT_ID = os.environ["CHAT_ID"]
+FEED_URL = os.environ["FEED_URL"]
 
 def send(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    r = requests.post(url, data={
+        "chat_id": CHAT_ID,
+        "text": msg,
+        "disable_web_page_preview": True
+    })
+    r.raise_for_status()
 
-data = requests.get(FEED_URL, timeout=20).json()
+# Fetch feed (Forex Factory returns a LIST)
+events = requests.get(FEED_URL, timeout=20).json()
 
-sent = set()
+now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-for e in data.get("events", [])[:5]:
-    uid = hashlib.md5(e["title"].encode()).hexdigest()
-    if uid in sent:
+count = 0
+for e in events:
+    # Only today's events
+    if e.get("date") != now_utc:
         continue
 
     message = (
         f"📊 {e['title']}\n"
-        f"🕒 {e['time']}\n"
+        f"🕒 {e['date']} {e['time']} UTC\n"
         f"🌍 {e['country']}\n"
-        f"⚠️ Impact: {e.get('impact', 'N/A')}"
+        f"⚠️ Impact: {e['impact']}"
     )
 
     send(message)
-    sent.add(uid)
+    count += 1
+
+if count == 0:
+    send("ℹ️ No economic events today.")
