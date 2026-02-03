@@ -8,6 +8,7 @@ CHAT_ID = os.environ["CHAT_ID"]
 FEED_URL = os.environ["FEED_URL"]
 
 # --- TIMEZONES ---
+UTC = timezone.utc
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # --- FILTERS ---
@@ -15,13 +16,13 @@ ALLOWED_IMPACT = {"High", "Medium"}
 ALLOWED_COUNTRY = {"USD", "CNY"}
 
 # --- ALERT WINDOW (minutes before event) ---
-# Production:
+# PRODUCTION (recommended)
 ALERT_MIN = 10
-ALERT_MAX = 2000
+ALERT_MAX = 20
 
-# Testing (20–30 hours before) → COMMENT OUT AFTER TESTING
-#ALERT_MIN = 20 * 60   # 20 hours
-#ALERT_MAX = 30 * 60   # 30 hours
+# ---- TESTING EXAMPLE (comment out in prod) ----
+# ALERT_MIN = 1000
+# ALERT_MAX = 2000
 
 def send(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -38,10 +39,10 @@ def send(msg):
 # Fetch Forex Factory weekly feed
 events = requests.get(FEED_URL, timeout=20).json()
 
-now_utc = datetime.now(timezone.utc)
+now_utc = datetime.now(UTC)
 
 for e in events:
-    # --- FILTERS ---
+    # --- BASIC FILTERS ---
     if e.get("impact") not in ALLOWED_IMPACT:
         continue
 
@@ -56,40 +57,46 @@ for e in events:
 
     event_dt_utc = None
 
-    # Case 1: ISO timestamp in date
-    try:
-        event_dt_utc = datetime.fromisoformat(date_raw)
-        if event_dt_utc.tzinfo is None:
-            event_dt_utc = event_dt_utc.replace(tzinfo=timezone.utc)
-        else:
-            event_dt_utc = event_dt_utc.astimezone(timezone.utc)
-    except ValueError:
-        pass
-
-    # Case 2: date + time
-    if event_dt_utc is None and time_raw and time_raw not in ("", "All Day"):
+    # ✅ PRIMARY: use scheduled date + time (authoritative)
+    if time_raw and time_raw not in ("", "All Day"):
         try:
             event_dt_utc = datetime.strptime(
-                f"{date_raw} {time_raw}",
+                f"{date_raw[:10]} {time_raw}",
                 "%Y-%m-%d %H:%M"
-            ).replace(tzinfo=timezone.utc)
+            ).replace(tzinfo=UTC)
         except ValueError:
             pass
 
-    # Skip events without a valid time
+    # ⛑️ FALLBACK: ISO timestamp only if no time exists
     if event_dt_utc is None:
-        continue
+        try:
+            iso_dt = datetime.fromisoformat(date_raw)
+            if iso_dt.tzinfo:
+                event_dt_utc = iso_dt.astimezone(UTC)
+            else:
+                event_dt_utc = iso_dt.replace(tzinfo=UTC)
+        except ValueError:
+            continue
 
-    # Minutes remaining
+    # Minutes until event
     minutes_to_event = (event_dt_utc - now_utc).total_seconds() / 60
 
-    # --- 15-minute-before (windowed) ---
+    # --- ALERT WINDOW CHECK ---
     if not (ALERT_MIN <= minutes_to_event <= ALERT_MAX):
         continue
 
     # Convert to IST
     event_dt_ist = event_dt_utc.astimezone(IST)
-    minutes_left = int(round(minutes_to_event))
+
+    # Human-friendly countdown
+    total_minutes = int(round(minutes_to_event))
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
+
+    if hours > 0:
+        countdown = f"{hours}h {minutes}m"
+    else:
+        countdown = f"{minutes}m"
 
     message = (
         f"🚨 UPCOMING ECONOMIC EVENT 🚨\n\n"
@@ -97,7 +104,7 @@ for e in events:
         f"🕒 {event_dt_ist.strftime('%d %b %Y, %I:%M %p')} IST\n"
         f"🌍 {e['country']}\n"
         f"⚠️ Impact: {e['impact']}\n\n"
-        f"⏰ Releasing in {minutes_left} minutes"
+        f"⏰ Releasing in {countdown}"
     )
 
     send(message)
