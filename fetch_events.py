@@ -15,7 +15,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 ALLOWED_IMPACT = {"High", "Medium"}
 ALLOWED_COUNTRY = {"USD", "CNY"}
 
-# --- ALERT WINDOW (minutes before event) ---
+# --- ALERT WINDOW (minutes before confirmed event) ---
 ALERT_MIN = 10
 ALERT_MAX = 20
 
@@ -31,8 +31,11 @@ def send(msg):
         timeout=20
     ).raise_for_status()
 
+# Fetch Forex Factory weekly feed
 events = requests.get(FEED_URL, timeout=20).json()
+
 now_utc = datetime.now(UTC)
+today_ist = datetime.now(IST).date()
 
 for e in events:
     # --- FILTERS ---
@@ -48,18 +51,22 @@ for e in events:
     if not date_raw:
         continue
 
-    # Tentative detection
+    # Detect tentative / all-day events
     is_tentative = not time_raw or time_raw in ("", "Tentative", "All Day")
 
-    # -----------------------------
-    # TENTATIVE EVENT (alert, no time)
-    # -----------------------------
+    # =============================
+    # TENTATIVE EVENT (DATE ONLY)
+    # =============================
     if is_tentative:
         try:
             event_date = datetime.strptime(
                 date_raw[:10], "%Y-%m-%d"
             ).date()
         except ValueError:
+            continue
+
+        # ✅ Only alert tentative events on TODAY (IST)
+        if event_date != today_ist:
             continue
 
         message = (
@@ -74,9 +81,9 @@ for e in events:
         send(message)
         continue
 
-    # -----------------------------
-    # CONFIRMED EVENT (time + countdown)
-    # -----------------------------
+    # =============================
+    # CONFIRMED EVENT (WITH TIME)
+    # =============================
     try:
         event_dt_utc = datetime.strptime(
             f"{date_raw[:10]} {time_raw}",
@@ -87,6 +94,7 @@ for e in events:
 
     minutes_to_event = (event_dt_utc - now_utc).total_seconds() / 60
 
+    # 🔔 15-minute-before window
     if not (ALERT_MIN <= minutes_to_event <= ALERT_MAX):
         continue
 
