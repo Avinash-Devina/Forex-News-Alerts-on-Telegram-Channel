@@ -2,7 +2,7 @@ name: Economic Calendar Bot
 
 on:
   schedule:
-    - cron: "0 * * * *"   # every hour
+    - cron: "0/30 * * * *"   # every 30 Min (UTC)
   workflow_dispatch:
 
 jobs:
