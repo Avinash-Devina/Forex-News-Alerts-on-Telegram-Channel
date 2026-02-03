@@ -16,12 +16,12 @@ ALLOWED_COUNTRY = {"USD", "CNY"}
 
 # --- ALERT WINDOW (minutes before event) ---
 # Production:
-#ALERT_MIN = 1000
-#ALERT_MAX = 2000
+ALERT_MIN = 10
+ALERT_MAX = 2000
 
 # Testing (20–30 hours before) → COMMENT OUT AFTER TESTING
-ALERT_MIN = 20 * 60   # 20 hours
-ALERT_MAX = 30 * 60   # 30 hours
+#ALERT_MIN = 20 * 60   # 20 hours
+#ALERT_MAX = 30 * 60   # 30 hours
 
 def send(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
