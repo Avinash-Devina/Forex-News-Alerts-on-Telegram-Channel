@@ -18,8 +18,8 @@ ALLOWED_IMPACT = {"High", "Medium"}
 ALLOWED_COUNTRY = {"USD", "CNY"}
 
 # --- ALERT WINDOW (minutes before confirmed event) ---
-ALERT_MIN = 1000
-ALERT_MAX = 2400
+ALERT_MIN = 150
+ALERT_MAX = 250
 
 # --- DEDUP FILE ---
 DEDUP_FILE = "sent_events.json"
