@@ -1,4 +1,6 @@
 import os
+import json
+import hashlib
 import requests
 from datetime import datetime, timedelta, timezone
 
@@ -19,6 +21,26 @@ ALLOWED_COUNTRY = {"USD", "CNY"}
 ALERT_MIN = 10
 ALERT_MAX = 20
 
+# --- DEDUP FILE ---
+DEDUP_FILE = "sent_events.json"
+
+# -------------------------
+# Helpers
+# -------------------------
+def load_sent():
+    if os.path.exists(DEDUP_FILE):
+        with open(DEDUP_FILE, "r") as f:
+            return set(json.load(f))
+    return set()
+
+def save_sent(sent):
+    with open(DEDUP_FILE, "w") as f:
+        json.dump(sorted(sent), f)
+
+def event_id(e, key):
+    raw = f"{e.get('title')}|{e.get('country')}|{key}"
+    return hashlib.sha1(raw.encode()).hexdigest()
+
 def send(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     requests.post(
@@ -31,9 +53,13 @@ def send(msg):
         timeout=20
     ).raise_for_status()
 
-# Fetch Forex Factory weekly feed
-events = requests.get(FEED_URL, timeout=20).json()
+# -------------------------
+# Load state
+# -------------------------
+sent_events = load_sent()
+changed = False
 
+events = requests.get(FEED_URL, timeout=20).json()
 now_utc = datetime.now(UTC)
 today_ist = datetime.now(IST).date()
 
@@ -41,7 +67,6 @@ for e in events:
     # --- FILTERS ---
     if e.get("impact") not in ALLOWED_IMPACT:
         continue
-
     if e.get("country") not in ALLOWED_COUNTRY:
         continue
 
@@ -51,8 +76,33 @@ for e in events:
     if not date_raw:
         continue
 
-    # Detect tentative / all-day events
-    is_tentative = not time_raw or time_raw in ("", "Tentative", "All Day")
+    # -------------------------
+    # STEP 1: PARSE EVENT TIME (CRITICAL FIX)
+    # -------------------------
+    event_dt_utc = None
+
+    # 1️⃣ ISO datetime inside `date`
+    try:
+        event_dt_utc = datetime.fromisoformat(date_raw)
+        if event_dt_utc.tzinfo is None:
+            event_dt_utc = event_dt_utc.replace(tzinfo=UTC)
+        else:
+            event_dt_utc = event_dt_utc.astimezone(UTC)
+    except ValueError:
+        pass
+
+    # 2️⃣ date + time fields
+    if event_dt_utc is None and time_raw and time_raw not in ("", "Tentative", "All Day"):
+        try:
+            event_dt_utc = datetime.strptime(
+                f"{date_raw[:10]} {time_raw}",
+                "%Y-%m-%d %H:%M"
+            ).replace(tzinfo=UTC)
+        except ValueError:
+            pass
+
+    # 3️⃣ Tentative only if BOTH failed
+    is_tentative = event_dt_utc is None
 
     # =============================
     # TENTATIVE EVENT (DATE ONLY)
@@ -65,8 +115,12 @@ for e in events:
         except ValueError:
             continue
 
-        # ✅ Only alert tentative events on TODAY (IST)
+        # Only alert tentative events on TODAY (IST)
         if event_date != today_ist:
+            continue
+
+        eid = event_id(e, f"tentative-{event_date}")
+        if eid in sent_events:
             continue
 
         message = (
@@ -79,31 +133,27 @@ for e in events:
         )
 
         send(message)
+        sent_events.add(eid)
+        changed = True
         continue
 
     # =============================
-    # CONFIRMED EVENT (WITH TIME)
+    # CONFIRMED EVENT (15-MIN ALERT)
     # =============================
-    try:
-        event_dt_utc = datetime.strptime(
-            f"{date_raw[:10]} {time_raw}",
-            "%Y-%m-%d %H:%M"
-        ).replace(tzinfo=UTC)
-    except ValueError:
-        continue
-
     minutes_to_event = (event_dt_utc - now_utc).total_seconds() / 60
 
-    # 🔔 15-minute-before window
     if not (ALERT_MIN <= minutes_to_event <= ALERT_MAX):
+        continue
+
+    eid = event_id(e, event_dt_utc.isoformat())
+    if eid in sent_events:
         continue
 
     event_dt_ist = event_dt_utc.astimezone(IST)
 
     total_minutes = int(round(minutes_to_event))
-    hours = total_minutes // 60
-    minutes = total_minutes % 60
-    countdown = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+    h, m = divmod(total_minutes, 60)
+    countdown = f"{h}h {m}m" if h > 0 else f"{m}m"
 
     message = (
         f"🚨 UPCOMING ECONOMIC EVENT 🚨\n\n"
@@ -115,3 +165,11 @@ for e in events:
     )
 
     send(message)
+    sent_events.add(eid)
+    changed = True
+
+# -------------------------
+# SAVE STATE
+# -------------------------
+if changed:
+    save_sent(sent_events)
