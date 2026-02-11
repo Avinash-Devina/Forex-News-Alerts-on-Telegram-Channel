@@ -25,16 +25,16 @@ ALLOWED_IMPACT = {"High", "Medium"}
 ALLOWED_COUNTRY = {"USD", "CNY"}
 
 # =========================
-# ALERT WINDOWS (minutes before)
+# SAFE ALERT WINDOWS (30-min cron compatible)
 # =========================
 ALERT_WINDOWS = {
-    "1H": (55, 65),
-    "30M": (25, 35),
-    "15M": (10, 20),
+    "1H": (50, 70),     # 50–70 minutes before
+    "30M": (20, 40),    # 20–40 minutes before
+    "15M": (5, 25),     # 5–25 minutes before
 }
 
 # =========================
-# DEDUP
+# DEDUP STORAGE
 # =========================
 DEDUP_FILE = "sent_events.json"
 
@@ -51,7 +51,7 @@ def save_sent(sent):
     with open(DEDUP_FILE, "w") as f:
         json.dump(sorted(sent), f)
 
-def event_id(key):
+def make_id(key):
     return hashlib.sha1(key.encode()).hexdigest()
 
 def send(msg):
@@ -76,24 +76,27 @@ events = requests.get(FEED_URL, timeout=20).json()
 now_utc = datetime.now(UTC)
 
 # =========================
-# GROUP EVENTS BY (TIME, ALERT)
+# GROUP EVENTS BY (TIME, ALERT TYPE)
 # =========================
 groups = defaultdict(lambda: defaultdict(list))
 
 for e in events:
+
     if e.get("impact") not in ALLOWED_IMPACT:
         continue
+
     if e.get("country") not in ALLOWED_COUNTRY:
         continue
 
     date_raw = e.get("date")
     time_raw = e.get("time")
+
     if not date_raw:
         continue
 
     event_dt_utc = None
 
-    # 1️⃣ ISO datetime inside `date`
+    # 1️⃣ ISO datetime (Forex Factory grouped releases)
     try:
         event_dt_utc = datetime.fromisoformat(date_raw)
         if event_dt_utc.tzinfo is None:
@@ -103,7 +106,7 @@ for e in events:
     except ValueError:
         pass
 
-    # 2️⃣ date + time fallback
+    # 2️⃣ Fallback to date + time fields
     if event_dt_utc is None and time_raw and time_raw not in ("", "Tentative", "All Day"):
         try:
             event_dt_utc = datetime.strptime(
@@ -126,8 +129,9 @@ for e in events:
 # SEND ALERTS (UNIFIED TEMPLATE)
 # =========================
 for (event_dt_utc, label), bucket in groups.items():
+
     dedup_key = f"{label}-{event_dt_utc.isoformat()}"
-    eid = event_id(dedup_key)
+    eid = make_id(dedup_key)
 
     if eid in sent_events:
         continue
@@ -139,11 +143,10 @@ for (event_dt_utc, label), bucket in groups.items():
     h, m = divmod(minutes_left, 60)
     countdown = f"{h}h {m}m" if h > 0 else f"{m}m"
 
-    # Build list
     lines = []
     for e in sorted(events_at_time, key=lambda x: x["impact"], reverse=True):
-        impact_emoji = "🔴" if e["impact"] == "High" else "🟠"
-        lines.append(f"{impact_emoji} {e['title']} ({e['impact']})")
+        impact_icon = "🔴" if e["impact"] == "High" else "🟠"
+        lines.append(f"{impact_icon} {e['title']} ({e['impact']})")
 
     countries = " & ".join(sorted({e["country"] for e in events_at_time}))
     event_word = "DATA RELEASE" if len(events_at_time) > 1 else "DATA EVENT"
